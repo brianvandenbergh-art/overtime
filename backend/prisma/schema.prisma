@@ -1,0 +1,138 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql" // change to "sqlite" for local free testing if needed
+  url      = env("DATABASE_URL")
+}
+
+model Company {
+  id                String   @id @default(uuid())
+  name              String
+  registrationNumber String?
+  email             String   @unique
+  phone             String?
+  address           String?
+  plan              String   @default("basic") // basic | pro | enterprise
+  planStatus        String   @default("trial") // trial | active | expired | cancelled
+  planExpiresAt     DateTime?
+  maxUsers          Int      @default(20)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  users             User[]
+  departments       Department[]
+  overtimeEntries   OvertimeEntry[]
+  payCycles         PayCycle[]
+  subscriptions     Subscription[]
+}
+
+model Department {
+  id        String   @id @default(uuid())
+  name      String
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  users     User[]
+  createdAt DateTime @default(now())
+
+  @@unique([companyId, name])
+}
+
+model User {
+  id            String   @id @default(uuid())
+  email         String
+  passwordHash  String
+  firstName     String
+  lastName      String
+  role          String   // company_admin | manager | employee | hr
+  phone         String?
+  // Salary stored encrypted (AES-256)
+  salaryEncrypted String?
+  hourlyRate    Float?   // calculated or override
+  isActive      Boolean  @default(true)
+  companyId     String
+  departmentId  String?
+  managerId     String?  // for employees
+
+  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  department    Department? @relation(fields: [departmentId], references: [id])
+  manager       User?    @relation("ManagerEmployees", fields: [managerId], references: [id])
+  employees     User[]   @relation("ManagerEmployees")
+
+  overtimeEntries OvertimeEntry[] @relation("EmployeeEntries")
+  approvals       ApprovalLog[]   @relation("ManagerApprovals")
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([companyId, email])
+  @@index([companyId, role])
+}
+
+model OvertimeEntry {
+  id          String   @id @default(uuid())
+  companyId   String
+  userId      String
+  date        DateTime
+  startTime   String   // "08:00"
+  endTime     String   // "18:00"
+  hours       Float
+  multiplier  Float    @default(1.5) // 1.5, 2.0, etc.
+  task        String
+  notes       String?
+  status      String   @default("pending") // pending | approved | rejected
+  amount      Float?   // calculated: hours * hourlyRate * multiplier
+
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user        User     @relation("EmployeeEntries", fields: [userId], references: [id], onDelete: Cascade)
+  approvals   ApprovalLog[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([companyId, status])
+  @@index([userId, date])
+}
+
+model ApprovalLog {
+  id        String   @id @default(uuid())
+  entryId   String
+  managerId String
+  status    String   // approved | rejected
+  comment   String?
+  createdAt DateTime @default(now())
+
+  entry     OvertimeEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  manager   User          @relation("ManagerApprovals", fields: [managerId], references: [id])
+}
+
+model PayCycle {
+  id          String   @id @default(uuid())
+  companyId   String
+  startDate   DateTime
+  endDate     DateTime
+  totalHours  Float    @default(0)
+  totalAmount Float    @default(0)
+  status      String   @default("open") // open | closed
+
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+
+  @@index([companyId, startDate])
+}
+
+model Subscription {
+  id                    String   @id @default(uuid())
+  companyId             String
+  plan                  String
+  amount                Int      // in cents
+  status                String   // pending | paid | failed | expired
+  ikhokhaPaylinkId      String?
+  ikhokhaExternalTxId   String?
+  paidAt                DateTime?
+  expiresAt             DateTime?
+  createdAt             DateTime @default(now())
+
+  company               Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+}
