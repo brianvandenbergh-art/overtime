@@ -18,8 +18,12 @@ api.interceptors.response.use(
   (err) => {
     if (err.response?.status === 401) {
       localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      window.location.href = '/login';
+      // Don't force redirect on public pages
+      if (!window.location.pathname.includes('/login') &&
+          !window.location.pathname.includes('/register') &&
+          !window.location.pathname.includes('/join')) {
+        window.location.href = '/login';
+      }
     }
     return Promise.reject(err);
   }

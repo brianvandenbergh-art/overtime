@@ -11,6 +11,7 @@ export default function Landing() {
             Overtime<span className="text-brand-500">SA</span>
           </div>
           <div className="flex items-center gap-3">
+            <Link to="/join" className="btn-secondary text-sm">Join with code</Link>
             <Link to="/login" className="btn-secondary text-sm">Sign in</Link>
             <Link to="/register" className="btn-primary text-sm">Start free trial</Link>
           </div>

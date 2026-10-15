@@ -14,6 +14,7 @@ model Company {
   email             String   @unique
   phone             String?
   address           String?
+  inviteCode        String   @unique  // e.g. ABC12XYZ – employees use this to join
   plan              String   @default("basic") // basic | pro | enterprise
   planStatus        String   @default("trial") // trial | active | expired | cancelled
   planExpiresAt     DateTime?

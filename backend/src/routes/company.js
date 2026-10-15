@@ -25,6 +25,7 @@ router.get('/', async (req, res) => {
         planStatus: true,
         planExpiresAt: true,
         maxUsers: true,
+        inviteCode: true,
         createdAt: true
       }
     });

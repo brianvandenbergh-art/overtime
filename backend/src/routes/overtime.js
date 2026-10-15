@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { authenticate, requireRole, requireCompanyAccess } from '../middleware/auth.js';
 import { decrypt, monthlyToHourly } from '../utils/encryption.js';
+import { getMultiplierForDate, estimateTaxOnOvertime } from '../utils/saRules.js';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -10,26 +11,31 @@ router.use(authenticate, requireCompanyAccess);
 
 /**
  * POST /api/overtime
- * Employee logs overtime
+ * Employee logs overtime – system AUTO-DETECTS 1.5× or 2× from the date
  */
 router.post('/', requireRole('employee', 'manager', 'company_admin', 'hr'), async (req, res) => {
   try {
-    const { date, startTime, endTime, hours, multiplier = 1.5, task, notes } = req.body;
+    const { date, startTime, endTime, hours, task, notes, multiplier: manualMultiplier } = req.body;
 
     if (!date || !startTime || !endTime || !hours || !task) {
       return res.status(400).json({ error: 'date, startTime, endTime, hours and task are required' });
     }
 
-    // Get user's hourly rate
+    // Auto-detect multiplier from date (Sunday / public holiday → 2×, else 1.5×)
+    const auto = getMultiplierForDate(date);
+    const multiplier = manualMultiplier ? Number(manualMultiplier) : auto.multiplier;
+
     const user = await prisma.user.findUnique({ where: { id: req.user.id } });
     let hourlyRate = user.hourlyRate;
-    if (!hourlyRate && user.salaryEncrypted) {
-      const salary = parseFloat(decrypt(user.salaryEncrypted));
-      hourlyRate = monthlyToHourly(salary);
+    let monthlySalary = 0;
+    if (user.salaryEncrypted) {
+      monthlySalary = parseFloat(decrypt(user.salaryEncrypted)) || 0;
+      if (!hourlyRate) hourlyRate = monthlyToHourly(monthlySalary);
     }
     hourlyRate = hourlyRate || 0;
 
     const amount = Number((hours * hourlyRate * multiplier).toFixed(2));
+    const estimatedTax = estimateTaxOnOvertime(amount, monthlySalary);
 
     const entry = await prisma.overtimeEntry.create({
       data: {
@@ -39,15 +45,20 @@ router.post('/', requireRole('employee', 'manager', 'company_admin', 'hr'), asyn
         startTime,
         endTime,
         hours: Number(hours),
-        multiplier: Number(multiplier),
+        multiplier,
         task,
-        notes,
+        notes: notes || `Auto: ${auto.reason}`,
         status: 'pending',
         amount
       }
     });
 
-    res.status(201).json(entry);
+    res.status(201).json({
+      ...entry,
+      autoReason: auto.reason,
+      estimatedTaxOnThisEntry: estimatedTax,
+      netEstimate: Number((amount - estimatedTax).toFixed(2))
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to create overtime entry' });
@@ -56,7 +67,6 @@ router.post('/', requireRole('employee', 'manager', 'company_admin', 'hr'), asyn
 
 /**
  * GET /api/overtime
- * List entries (own for employee, team for manager, all for admin/hr)
  */
 router.get('/', async (req, res) => {
   try {
@@ -70,11 +80,9 @@ router.get('/', async (req, res) => {
       if (to) where.date.lte = new Date(to);
     }
 
-    // Role-based filtering
     if (req.user.role === 'employee') {
       where.userId = req.user.id;
     } else if (req.user.role === 'manager') {
-      // Managers see their own + direct reports
       const reports = await prisma.user.findMany({
         where: { managerId: req.user.id },
         select: { id: true }
@@ -82,7 +90,6 @@ router.get('/', async (req, res) => {
       const ids = [req.user.id, ...reports.map(r => r.id)];
       where.userId = { in: ids };
     }
-    // company_admin and hr see all company entries
 
     const entries = await prisma.overtimeEntry.findMany({
       where,
@@ -105,11 +112,10 @@ router.get('/', async (req, res) => {
 
 /**
  * PATCH /api/overtime/:id/approve
- * Manager / Admin / HR approve or reject
  */
 router.patch('/:id/approve', requireRole('manager', 'company_admin', 'hr'), async (req, res) => {
   try {
-    const { status, comment } = req.body; // status: approved | rejected
+    const { status, comment } = req.body;
     if (!['approved', 'rejected'].includes(status)) {
       return res.status(400).json({ error: 'status must be approved or rejected' });
     }
@@ -144,7 +150,6 @@ router.patch('/:id/approve', requireRole('manager', 'company_admin', 'hr'), asyn
 
 /**
  * GET /api/overtime/export/csv
- * Export approved entries for a date range
  */
 router.get('/export/csv', requireRole('manager', 'company_admin', 'hr'), async (req, res) => {
   try {
@@ -178,6 +183,16 @@ router.get('/export/csv', requireRole('manager', 'company_admin', 'hr'), async (
     console.error(err);
     res.status(500).json({ error: 'Export failed' });
   }
+});
+
+/**
+ * GET /api/overtime/preview-multiplier?date=2026-12-25
+ */
+router.get('/preview-multiplier', (req, res) => {
+  const { date } = req.query;
+  if (!date) return res.status(400).json({ error: 'date required' });
+  const result = getMultiplierForDate(date);
+  res.json(result);
 });
 
 export default router;

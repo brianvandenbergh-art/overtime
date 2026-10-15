@@ -4,6 +4,7 @@ import Layout from './components/Layout';
 import Landing from './pages/Landing';
 import Login from './pages/Login';
 import Register from './pages/Register';
+import Join from './pages/Join';
 import Dashboard from './pages/Dashboard';
 import OvertimeList from './pages/OvertimeList';
 import LogOvertime from './pages/LogOvertime';
@@ -25,6 +26,7 @@ export default function App() {
       <Route path="/" element={<Landing />} />
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
+      <Route path="/join" element={<Join />} />
       <Route path="/payment/success" element={<PaymentResult status="success" />} />
       <Route path="/payment/failed" element={<PaymentResult status="failed" />} />
       <Route path="/payment/cancel" element={<PaymentResult status="cancel" />} />
